@@ -5,15 +5,17 @@
 
 from argparse import ArgumentParser
 from collections import OrderedDict
+from datetime import timedelta
 from dateutil import parser
 import chardet
+import os
 import re
 import sys
 
 PLAYRES_X = 384
 PLAYRES_Y = 288
-X_SCALE_FACTOR = 0.6
-Y_SCALE_FACTOR = 0.7
+X_SCALE_FACTOR = 1.0
+Y_SCALE_FACTOR = 1.0
 DEFAULT_STYLE = OrderedDict([
     ('Name', 'Default'),
     ('Fontname', 'Arial'),
@@ -131,7 +133,7 @@ def parse_srt(lines):
             if not line:
                 if not text:
                     print('Line#', i, 'No text in dialogue')
-                    raise RuntimeError('Incorrect SRT format')
+                    #raise RuntimeError('Incorrect SRT format')
                 else:
                     events.append((start_ts, end_ts, text))
                     start_ts = None
@@ -144,7 +146,7 @@ def parse_srt(lines):
     return events
 
 
-def convert_to_ass(events, is3d=False,
+def convert_to_ass(events, is3d=False, shift=0.0,
                    playres_x=PLAYRES_X, playres_y=PLAYRES_Y,
                    default_style=DEFAULT_STYLE,
                    left_style=LEFT_STYLE,
@@ -171,7 +173,8 @@ def convert_to_ass(events, is3d=False,
             style=','.join([str(val) for val in right_style.values()])))
     lines.append('')
     lines.append('[Events]')
-    lines.append('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
+    lines.append('Format: Layer, Start, End, Style, Name, '
+        'MarginL, MarginR, MarginV, Effect, Text')
 
     if is3d:
         dialogue  = 'Dialogue: 0,{start_ts},{end_ts},Left,,0,0,0,0,{text}\r\n'
@@ -179,9 +182,10 @@ def convert_to_ass(events, is3d=False,
     else:
         dialogue  = 'Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,0,{text}'
 
+    shift_td = timedelta(seconds=shift)
     lines += [dialogue.format(
-                start_ts=event[0].strftime('%H:%M:%S.%f')[:-4],
-                end_ts=event[1].strftime('%H:%M:%S.%f')[:-4],
+                start_ts=(event[0] + shift_td).strftime('%H:%M:%S.%f')[:-4],
+                end_ts=(event[1] + shift_td).strftime('%H:%M:%S.%f')[:-4],
                 text='\\N'.join(event[2]))
               for event in events]
     return '\r\n'.join(lines)
@@ -190,24 +194,43 @@ def convert_to_ass(events, is3d=False,
 def parse_args():
     argp = ArgumentParser()
     argp.add_argument('filename', help='Path to SRT file')
-    argp.add_argument('-3d', action='store_true', dest='_3d', default=False, help='Create a 3D SBS subtitle (without depth)')
-    argp.add_argument('-xs', '--xscale', type=float, default=X_SCALE_FACTOR, help='Horizontal scale factor (3D only)')
-    argp.add_argument('-ys', '--yscale', type=float, default=Y_SCALE_FACTOR, help='Vertical scale factor (3D only)')
+    argp.add_argument(
+        '-3d', action='store_true',
+        dest='_3d',
+        default=False,
+        help='Create a 3D SBS subtitle (without depth)')
+    argp.add_argument(
+        '-xs', '--xscale',
+        type=float,
+        default=X_SCALE_FACTOR,
+        help='Horizontal scale factor')
+    argp.add_argument(
+        '-ys', '--yscale',
+        type=float,
+        default=Y_SCALE_FACTOR,
+        help='Vertical scale factor')
+    argp.add_argument(
+        '-s', '--shift',
+        type=float,
+        default=0.0,
+        help='Shift time (seconds)')
     return argp.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_args()
     ##print(args); exit()
+    DEFAULT_STYLE['ScaleX'] = int(100*args.xscale)
+    DEFAULT_STYLE['ScaleY'] = int(100*args.yscale)
     LEFT_STYLE['ScaleX'] = int(100*args.xscale)
     LEFT_STYLE['ScaleY'] = int(100*args.yscale)
     RIGHT_STYLE['ScaleX'] = int(100*args.xscale)
     RIGHT_STYLE['ScaleY'] = int(100*args.yscale)
     lines = read_file(args.filename)
     events = parse_srt(lines)
-    ass = convert_to_ass(events, is3d=args._3d)
+    ass = convert_to_ass(events, is3d=args._3d, shift=args.shift)
     ext = '.converted2.3dsbs.ass' if args._3d else '.converted2.ass'
-    with open(args.filename + ext, 'wt', newline='\r\n') as f:
+    newfn = os.path.basename(args.filename) + ext
+    with open(newfn, 'wt', newline='\r\n') as f:
         f.write(ass)
-
-
+        print('Converted subtitle saved in', newfn)
